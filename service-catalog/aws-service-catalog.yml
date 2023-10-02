@@ -16,7 +16,7 @@
 # SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                                #
 #########################################################################################
 
-WSTemplateFormatVersion: 2010-09-09
+AWSTemplateFormatVersion: 2010-09-09
 Description: This template creates Service Catalog resources for AWS Application Migration Service (MGN) and Elastic Diaster Recovery (DRS) initilization automation
 
 Parameters: 
