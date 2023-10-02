@@ -1,0 +1,184 @@
+#########################################################################################
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.                    #
+# SPDX-License-Identifier: MIT-0                                                        #
+#                                                                                       #
+# Permission is hereby granted, free of charge, to any person obtaining a copy of this  #
+# software and associated documentation files (the "Software"), to deal in the Software #
+# without restriction, including without limitation the rights to use, copy, modify,    #
+# merge, publish, distribute, sublicense, and/or sell copies of the Software, and to    #
+# permit persons to whom the Software is furnished to do so.                            #
+#                                                                                       #
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,   #
+# INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A         #
+# PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT    #
+# HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION     #
+# OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE        #
+# SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                                #
+#########################################################################################
+
+AWSTemplateFormatVersion: 2010-09-09
+Description: This template creates an IAM role for Service Catalog Launch Contraints
+
+Parameters:
+  pLaunchConstraintRoleName:
+    Type: String
+    Default: MGNDRSServiceCatalogLaunchConstraintRole
+    Description: Name of the launch constraint IAM role for the AWS Service Catalog portfolio to be created across accounts
+  pSCEndUserRoleName:
+    Type: String
+    Default: ServiceCatalogEndUserRole
+    Description: Name of a role which can execute products in this portfolio
+
+Metadata:
+  AWS::CloudFormation::Interface: 
+    ParameterGroups: 
+      - 
+        Label: 
+          default: "IAM Role Names"
+        Parameters: 
+          - pLaunchConstraintRoleName
+          - pSCEndUserRoleName
+
+    ParameterLabels:
+      pLaunchConstraintRoleName: 
+        default: Name of the launch constraint IAM role for the AWS Service Catalog portfolio to be created across accounts
+      pSCEndUserRoleName:
+        default: Name of a role which can execute products in this portfolio
+
+Resources:
+  rLaunchConstraintRole:
+    Type: AWS::IAM::Role
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W11
+            reason: Roles are created and full ARNs are not known
+          - id: W28
+            reason: Explicit name required for AWS Blog post
+      checkov:
+        skip:
+          - id: CKV_AWS_111
+            comment: Service Catalog Launch constraint requires permissions to resources created for the soluiton (i.e. with generated names)
+          - id: CKV_AWS_108
+            comment: Service Catalog Launch constraint requires permissions to resources created for the soluiton (i.e. with generated names)
+          - id: CKV_AWS_109
+            comment: Service Catalog Launch constraint requires permissions to resources created for the soluiton (i.e. with generated names)
+    Properties:
+      RoleName: !Ref pLaunchConstraintRoleName
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement: 
+        - Effect: Allow
+          Principal: 
+            Service:
+            - servicecatalog.amazonaws.com
+          Action:
+          - sts:AssumeRole
+      Policies:
+        - PolicyName: InitializeMGNDRS
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+            - Sid: EC2Describe
+              Effect: Allow
+              Action:
+              - ec2:Describe*
+              Resource: "*"
+            - Sid: LambdaActions
+              Effect: Allow
+              Action:
+              - lambda:GetFunction
+              - lambda:CreateFunction
+              - lambda:DeleteFunction
+              - lambda:InvokeFunction
+              Resource:
+              - !Sub arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:*MGN*
+              - !Sub arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:*DRS*
+              - !Sub arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:*mgn*
+              - !Sub arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:*drs*
+            - Sid: IAMRead
+              Effect: Allow
+              Action:
+              - iam:List*
+              - iam:Get*
+              Resource: "*"
+            - Sid: IAMWrite
+              Effect: Allow
+              Action:
+              - iam:AddRoleToInstanceProfile
+              - iam:DeleteRole
+              - iam:CreateInstanceProfile
+              - iam:PassRole
+              - iam:DeleteInstanceProfile
+              - iam:RemoveRoleFromInstanceProfile
+              - iam:CreateRole
+              - iam:PutRolePolicy
+              - iam:DetachRolePolicy
+              - iam:AttachRolePolicy
+              - iam:DeleteRolePolicy
+              - iam:UntagRole
+              - iam:TagRole
+              Resource: 
+              - !Sub arn:aws:iam::${AWS::AccountId}:role/*MGN*
+              - !Sub arn:aws:iam::${AWS::AccountId}:role/*DRS*
+              - !Sub arn:aws:iam::${AWS::AccountId}:role/*mgn*
+              - !Sub arn:aws:iam::${AWS::AccountId}:role/*drs*
+              - !Sub arn:aws:iam::${AWS::AccountId}:instance-profile/*MGN*
+              - !Sub arn:aws:iam::${AWS::AccountId}:instance-profile/*mgn*
+              - !Sub arn:aws:iam::${AWS::AccountId}:role/service-role/AWSElasticDisasterRecovery*
+              - !Sub arn:aws:iam::${AWS::AccountId}:role/service-role/AWSApplicationMigration*
+              - !Sub arn:aws:iam::${AWS::AccountId}:role/service-role/*AWSServiceRoleForApplicationMigrationService*
+              - !Sub arn:aws:iam::${AWS::AccountId}:role/${pLaunchConstraintRoleName}
+              - !Sub arn:aws:iam::${AWS::AccountId}:policy/*
+            - Sid: CloudFormationActions
+              Effect: Allow
+              Action:
+              - cloudformation:DescribeStackResource
+              - cloudformation:DescribeStackResources
+              - cloudformation:GetTemplate
+              - cloudformation:List*
+              - cloudformation:DescribeStackEvents
+              - cloudformation:DescribeStacks
+              - cloudformation:CreateStack
+              - cloudformation:DeleteStack
+              - cloudformation:DescribeStackEvents
+              - cloudformation:DescribeStacks
+              - cloudformation:GetTemplateSummary
+              - cloudformation:SetStackPolicy
+              - cloudformation:ValidateTemplate
+              - cloudformation:UpdateStack
+              Resource: "*"
+            - Sid: S3GetObject
+              Effect: Allow
+              Action:
+              - S3:GetObject
+              Resource: "*"
+
+  rServiceCatalogEndUserRole:
+    Type: AWS::IAM::Role
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W28
+            reason: Explicit name required for AWS Blog post
+    Properties:
+      RoleName: !Ref pSCEndUserRoleName
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement: 
+        - Effect: Allow
+          Principal: 
+            AWS:
+            - !Sub arn:aws:iam::${AWS::AccountId}:root
+          Action:
+          - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AWSServiceCatalogEndUserFullAccess
+      
+Outputs:
+  oLaunchConstraintRoleArn:
+    Value: !GetAtt rLaunchConstraintRole.Arn
+    Description: ARN of the launch constraint role created for your AWS Service Catalog portfolio
+  oServiceCatalogEndUserRole:
+    Value: !GetAtt rServiceCatalogEndUserRole.Arn
+    Description: ARN of the end user role created for your AWS Service Catalog portfolio

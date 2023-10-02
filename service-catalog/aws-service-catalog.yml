@@ -1,0 +1,401 @@
+#########################################################################################
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.                    #
+# SPDX-License-Identifier: MIT-0                                                        #
+#                                                                                       #
+# Permission is hereby granted, free of charge, to any person obtaining a copy of this  #
+# software and associated documentation files (the "Software"), to deal in the Software #
+# without restriction, including without limitation the rights to use, copy, modify,    #
+# merge, publish, distribute, sublicense, and/or sell copies of the Software, and to    #
+# permit persons to whom the Software is furnished to do so.                            #
+#                                                                                       #
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,   #
+# INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A         #
+# PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT    #
+# HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION     #
+# OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE        #
+# SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                                #
+#########################################################################################
+
+WSTemplateFormatVersion: 2010-09-09
+Description: This template creates Service Catalog resources for AWS Application Migration Service (MGN) and Elastic Diaster Recovery (DRS) initilization automation
+
+Parameters: 
+  pAcceptLanguage:
+    Description: The language code.
+    Type: String
+    AllowedValues:
+      - en
+      - jp
+      - zh
+  pPortfolioDescription:
+    Description: The description of the portfolio.
+    Default: "Service Catalog Portfolio for AWS Application Migration Service (MGN) and Elastic Disaster Recovery (DRS) Service Initilization Automation."
+    Type: String
+  pDisplayName:
+    Description: The name to use for display purposes.
+    Default: MGN-DRS-Init
+    Type: String
+  pProviderName:
+    Description: The name of the portfolio provider.
+    Default: Cloud-Platform
+    Type: String
+  pPortfolioOwner:
+    Description: The Owner tag for the portfolio.
+    Default: CloudPlatformTeam
+    Type: String
+  pPortfolioCategory:
+    Description: The Category tag for the portfolio.
+    Default: Migration
+    Type: String
+  pProductDistributor:
+    Description: The distributor of the product.
+    Type: String
+    Default: ""
+  pProductOwner:
+    Description: The owner of the product.
+    Type: String
+  pMGNProductSupportDescription:
+    Description: The support information about the product.
+    Type: String
+    Default: ""
+  pDRSProductSupportDescription:
+    Description: The support information about the product.
+    Type: String
+    Default: ""
+  pMGNProductSupportEmail:
+    Description: The contact email for product support.
+    Type: String
+    Default: ""
+  pDRSProductSupportEmail:
+    Description: The contact email for product support.
+    Type: String
+    Default: ""
+  pMGNProductSupportUrl:
+    Description: The contact URL for product support.
+    Type: String
+    Default: ""
+  pDRSProductSupportUrl:
+    Description: The contact URL for product support.
+    Type: String
+    Default: ""
+  pMGNTemplateS3Url:
+    Description: The URL of the MGN AWS CloudFormation template in Amazon S3.
+    Type: String
+  pDRSTemplateS3Url:
+    Description: The URL of the DRS AWS CloudFormation template in Amazon S3.
+    Type: String
+  pLaunchConstraintLocalRoleName:
+    Description: IAM role name for the launch containt in the account
+    Type: String
+  pOrganizationId:
+    Type: String
+    Description: AWS Organization Id
+
+Metadata: 
+  AWS::CloudFormation::Interface: 
+    ParameterGroups:
+      - 
+        Label: 
+          default: "General"
+        Parameters: 
+          - pAcceptLanguage
+          - pLaunchConstraintLocalRoleName
+          - pOrganizationId
+      - 
+        Label: 
+          default: "Service Catalog Portfolio"
+        Parameters: 
+          - pPortfolioDescription
+          - pDisplayName
+          - pProviderName
+          - pPortfolioOwner
+          - pPortfolioCategory
+      - 
+        Label: 
+          default: "Service Catalog Products"
+        Parameters:
+          - pProductOwner
+          - pProductDistributor
+          - pMGNProductSupportDescription
+          - pMGNProductSupportEmail
+          - pMGNProductSupportUrl
+          - pDRSProductSupportDescription
+          - pDRSProductSupportEmail
+          - pDRSProductSupportUrl
+
+    ParameterLabels: 
+      pAcceptLanguage: 
+        default: The language code.
+      pPortfolioDescription:
+        default: The description of the portfolio.
+      pLaunchConstraintLocalRoleName:
+        default: IAM Role name for the Launch Contraint.
+      pDisplayName:
+        default: The name to use for display purposes.
+      pProviderName:
+        default: The name of the portfolio provider.
+      pPortfolioOwner:
+        default: The Owner tag for the portfolio.
+      pPortfolioCategory:
+        default: The Category tag for the portfolio.
+      pProductDistributor:
+        default: The distributor of the product.
+      pProductOwner:
+        default: The owner of the product.
+      pMGNProductSupportDescription:
+        default: The support information about the product.
+      pMGNProductSupportEmail:
+        default: The contact email for product support.
+      pMGNProductSupportUrl:
+        default: The contact URL for product support.
+      pMGNTemplateS3Url:
+        default: The URL of the AWS CloudFormation template in Amazon S3.
+      pDRSProductSupportDescription:
+        default: The support information about the product.
+      pDRSProductSupportEmail:
+        default: The contact email for product support.
+      pDRSProductSupportUrl:
+        default: The contact URL for product support.
+      pDRSTemplateS3Url:
+        default: The URL of the AWS CloudFormation template in Amazon S3.
+      pOrganizationId:
+        default: AWS Organization Id
+
+Resources:
+  rMGNDRSInitPortfolio:
+    Type: AWS::ServiceCatalog::Portfolio
+    Properties: 
+      AcceptLanguage: !Ref pAcceptLanguage
+      Description: !Ref pPortfolioDescription
+      DisplayName: !Ref pDisplayName
+      ProviderName: !Ref pProviderName
+      Tags: 
+        - Key: Owner
+          Value: !Ref pPortfolioOwner
+        - Key: Catagory
+          Value: !Ref pPortfolioCategory
+
+  rMGNInitPortfolioLaunchRoleConstraint:
+    Type: AWS::ServiceCatalog::LaunchRoleConstraint
+    DependsOn: rMGNInitProductPortFolioAssociation
+    Properties:
+      AcceptLanguage: !Ref pAcceptLanguage
+      Description: "Launch Contraint for MGN Service Initialization Automation"
+      PortfolioId: !Ref rMGNDRSInitPortfolio
+      ProductId: !Ref rMGNInitProduct
+      LocalRoleName: !Ref pLaunchConstraintLocalRoleName
+
+  rMGNInitProduct:
+    Type: AWS::ServiceCatalog::CloudFormationProduct
+    Properties:
+      AcceptLanguage: !Ref pAcceptLanguage
+      Description: MGN Initilization Automation Service Catalog Product
+      Distributor: !Ref pProductDistributor
+      Name: MGNInitlizationAutomationServiceCatalogProduct
+      Owner: !Ref pProductOwner
+      ProvisioningArtifactParameters:
+        - Info:
+            LoadTemplateFromURL: !Ref pMGNTemplateS3Url
+          Description: MGN Initilization Automation Service Catalog Provisioned Product
+          DisableTemplateValidation: false
+          Name: v1
+      SupportDescription: !Ref pMGNProductSupportDescription
+      SupportEmail: !Ref pMGNProductSupportEmail
+      SupportUrl: !Ref pMGNProductSupportUrl
+
+  rMGNInitProductPortFolioAssociation:
+    Type: AWS::ServiceCatalog::PortfolioProductAssociation
+    Properties:
+      AcceptLanguage: !Ref pAcceptLanguage
+      PortfolioId: !Ref rMGNDRSInitPortfolio
+      ProductId: !Ref rMGNInitProduct
+
+  rDRSInitProduct:
+    Type: AWS::ServiceCatalog::CloudFormationProduct
+    Properties:
+      AcceptLanguage: !Ref pAcceptLanguage
+      Description: DRS Initilization Automation Service Catalog Product
+      Distributor: !Ref pProductDistributor
+      Name: DRSInitlizationAutomationServiceCatalogProduct
+      Owner: !Ref pProductOwner
+      ProvisioningArtifactParameters:
+        - Info:
+            LoadTemplateFromURL: !Ref pDRSTemplateS3Url
+          Description: DRS Initilization Automation Service Catalog Provisioned Product
+          DisableTemplateValidation: false
+          Name: v1
+      SupportDescription: !Ref pDRSProductSupportDescription
+      SupportEmail: !Ref pDRSProductSupportEmail
+      SupportUrl: !Ref pDRSProductSupportUrl
+
+  rDRSInitProductPortFolioAssociation:
+    Type: AWS::ServiceCatalog::PortfolioProductAssociation
+    Properties:
+      AcceptLanguage: !Ref pAcceptLanguage
+      PortfolioId: !Ref rMGNDRSInitPortfolio
+      ProductId: !Ref rDRSInitProduct
+
+  rDRSInitPortfolioLaunchRoleConstraint:
+    Type: AWS::ServiceCatalog::LaunchRoleConstraint
+    DependsOn: rDRSInitProductPortFolioAssociation
+    Properties:
+      AcceptLanguage: !Ref pAcceptLanguage
+      Description: "Launch Contraint for DRS Service Initialization Automation"
+      PortfolioId: !Ref rMGNDRSInitPortfolio
+      ProductId: !Ref rDRSInitProduct
+      LocalRoleName: !Ref pLaunchConstraintLocalRoleName
+
+###############################################
+## Custom Resource to share portfolio via OU ##
+###############################################
+
+  rServicesPortfolioShare:
+    Type: Custom::ServicesPortfolioShare
+    Properties:
+        ServiceToken: !GetAtt rCreateSCPortfolioShareLambda.Arn
+        PortfolioId: !Ref rMGNDRSInitPortfolio
+        OrganizationId: !Ref pOrganizationId
+
+  rCreateSCPortfolioShareLambda:
+    Type: AWS::Lambda::Function
+    Metadata:
+        cfn_nag:
+            rules_to_suppress:
+            - id: W89
+              reason: "Not a valid use case for Lambda functions to be deployed inside a VPC."
+            - id: W92
+              reason: "Not a valid use case for Lambda reserved concurrency."
+        checkov:
+          skip:
+            - id: CKV_AWS_115
+              comment: Function will be invoked once per Service Catalog Product deployment
+            - id: CKV_AWS_116
+              comment: CloudFormation custom resource Lambda - use CloudWatch logs for troubleshooting
+            - id: CKV_AWS_117
+              comment: Not a valid use case for Lambda function to be deployed inside a VPC
+    Properties:
+        Runtime: python3.8
+        Timeout: 900
+        Handler: "index.handler"
+        FunctionName: MGNDRSInitCreateSCPortfolioShareLambda
+        Role: !GetAtt rCreateSCPortfolioShareLambdaRole.Arn
+        Code:
+            ZipFile: |
+                import boto3, json, logging, os
+                import cfnresponse
+                from botocore.vendored import requests
+                log = logging.getLogger()
+                log.setLevel(logging.INFO)
+                def handler(event, context):
+                    log.info('Received event: {}'.format(json.dumps(event)))
+                    if event["RequestType"] == "Delete":
+                        cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+                    if event['RequestType'] == 'Delete':
+                        deleteShare(event, context)
+                    if event['RequestType'] == 'Create':
+                        createShare(event, context)
+                def deleteShare(event, context):
+                    try:
+                        portfolioId= event['ResourceProperties']['PortfolioId']
+                        organizationId = event['ResourceProperties']['OrganizationId']
+                        scClient = boto3.client('servicecatalog') #PARSE THIS LATER
+                        resp = scClient.describe_portfolio_shares(PortfolioId= portfolioId, Type='ORGANIZATION')
+                        # check if share exists
+                        if resp['PortfolioShareDetails']:
+                            # delete share
+                            scClient.delete_portfolio_share(
+                                PortfolioId=portfolioId,
+                                OrganizationNode = {
+                                'Type': 'ORGANIZATION',
+                                'Value': organizationId
+                            })
+                        cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+                    except Exception as e:
+                        log.error(e)
+                        responseStatus = cfnresponse.FAILED
+                        cfnresponse.send(event, context, responseStatus, {})
+                def createShare(event,context):
+                    #create the portfolio share here
+                    try:
+                        responseData = {}
+                        portfolioId= event['ResourceProperties']['PortfolioId']
+                        organizationId = event['ResourceProperties']['OrganizationId']
+                        scClient = boto3.client('servicecatalog', region_name=os.environ['AWS_REGION'])
+                        resp= scClient.create_portfolio_share(
+                            PortfolioId = portfolioId,
+                            OrganizationNode = {
+                                'Type': 'ORGANIZATION',
+                                'Value': organizationId
+                            },
+                            SharePrincipals=True
+                        )
+                        responseStatus = cfnresponse.SUCCESS
+                        responseValue =resp['PortfolioShareToken']
+                        responseData['Data']=responseValue
+                        cfnresponse.send(event, context, responseStatus, responseData)
+                    except Exception as e:
+                        log.error(e)
+                        responseStatus = cfnresponse.FAILED
+                        responseData={}
+                        cfnresponse.send(event, context, responseStatus, responseData)
+
+  rCreateSCPortfolioShareLambdaRole:
+    Type: 'AWS::IAM::Role'
+    Metadata:
+        cfn_nag:
+            rules_to_suppress:
+                - id: W11
+                  reason: "Allow sharing portfolio."
+        checkov:
+          skip:
+            - id: CKV_AWS_111
+              comment: "Resource Wildcard required for dynamic resource creation"
+            - id: CKV_AWS_107
+              comment: "Lambda not logging sensitive data"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+            Condition:
+              StringEquals:
+                aws:SourceArn: !Sub arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:MGNDRSInitCreateSCPortfolioShareLambda
+      Path: /
+      Policies:
+        - PolicyName: CreateSCPortfolioShareLambdaRolePolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - servicecatalog:CreatePortfolioShare
+                  - servicecatalog:DeletePortfolioShare
+                  - servicecatalog:DescribePortfolioShares
+                Resource: !Sub arn:aws:catalog:${AWS::Region}:${AWS::AccountId}:portfolio/${rMGNDRSInitPortfolio}
+              - Effect: Allow
+                Action:
+                  - organizations:Describe*
+                  - organizations:List*
+                  - account:GetAlternateContact
+                  - account:GetContactInformation
+                  - account:ListRegions
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                - logs:CreateLogGroup
+                - logs:CreateLogStream
+                - logs:PutLogEvents
+                Resource: arn:aws:logs:*:*:*
+
+Outputs:
+  oMGNDRSInitPortfolioId:
+    Description: Service Catalog Portfolio ID
+    Value: !Ref rMGNDRSInitPortfolio
+    Export:
+      Name: 
+        !Sub ${AWS::StackName}-PortfolioId

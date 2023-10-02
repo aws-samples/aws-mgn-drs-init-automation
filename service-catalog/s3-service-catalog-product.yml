@@ -1,0 +1,130 @@
+#########################################################################################
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.                    #
+# SPDX-License-Identifier: MIT-0                                                        #
+#                                                                                       #
+# Permission is hereby granted, free of charge, to any person obtaining a copy of this  #
+# software and associated documentation files (the "Software"), to deal in the Software #
+# without restriction, including without limitation the rights to use, copy, modify,    #
+# merge, publish, distribute, sublicense, and/or sell copies of the Software, and to    #
+# permit persons to whom the Software is furnished to do so.                            #
+#                                                                                       #
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,   #
+# INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A         #
+# PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT    #
+# HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION     #
+# OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE        #
+# SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                                #
+#########################################################################################
+
+AWSTemplateFormatVersion: 2010-09-09
+Description: This template creates an S3 bucket for CloudFormation templates to be used by Service Catalog
+
+Parameters:
+  pAWSOrganizationId:
+    Type: String
+    Description: AWS Organization ID
+  pBucketOnwer:
+    Description: The Owner tag for the bucket.
+    Default: CloudPlatformTeam
+    Type: String
+
+Metadata: 
+  AWS::CloudFormation::Interface: 
+    ParameterGroups:
+      - 
+        Label: 
+          default: "General"
+        Parameters:
+          - pAWSOrganizationId
+          - pBucketOnwer
+
+Resources:
+  rS3ServiceCatalogProductBucket:
+    Type: AWS::S3::Bucket
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W35
+            reason: Do not require creation of a logging bucket
+      checkov:
+        skip:
+          - id: CKV_AWS_18
+            comment: Access logging not required for temporary bucket containing publicly available code
+          - id: CKV_AWS_21
+            comment: Versioning not required for this bucket
+          - id: CKV_AWS_54
+            comment: Bucket intended to contain packaged Lambda binaries from public repo
+    Properties:
+      BucketEncryption: 
+        ServerSideEncryptionConfiguration:
+          - BucketKeyEnabled: true
+            ServerSideEncryptionByDefault:
+              SSEAlgorithm: aws:kms
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration: 
+        Status: Enabled
+      Tags: 
+        - Key: Owner
+          Value: !Ref pBucketOnwer
+
+  rS3ServiceCatalogProductBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: F16
+            reason: The conditon limits access to objects in the bucket from principals only in the AWS Organization
+    Properties: 
+      Bucket: !Ref rS3ServiceCatalogProductBucket
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Action:
+              - s3:GetLifecycleConfiguration
+              - s3:ListBucket
+              - s3:GetObject
+            Effect: Allow
+            Resource: 
+              - !Join
+                - ''
+                - - 'arn:aws:s3:::'
+                  - !Ref rS3ServiceCatalogProductBucket
+              - !Join
+                - ''
+                - - 'arn:aws:s3:::'
+                  - !Ref rS3ServiceCatalogProductBucket
+                  - /*
+            Principal:
+              AWS: !Sub arn:aws:iam::${AWS::AccountId}:root
+              Service:
+                - servicecatalog.amazonaws.com
+                - cloudformation.amazonaws.com
+          - Action:
+              - s3:GetLifecycleConfiguration
+              - s3:ListBucket
+              - s3:GetObject
+            Effect: Allow
+            Resource:
+              - !Join
+                - ''
+                - - 'arn:aws:s3:::'
+                  - !Ref rS3ServiceCatalogProductBucket
+              - !Join
+                - ''
+                - - 'arn:aws:s3:::'
+                  - !Ref rS3ServiceCatalogProductBucket
+                  - /*
+            Principal:
+              AWS: "*"
+            Condition:
+              StringEquals:
+                aws:PrincipalOrgId: !Ref pAWSOrganizationId
+
+Outputs:
+  oBucketName:
+    Description: Service Catalog Product S3 Bucket Name
+    Value: !Ref rS3ServiceCatalogProductBucket

@@ -1,0 +1,730 @@
+#########################################################################################
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.                    #
+# SPDX-License-Identifier: MIT-0                                                        #
+#                                                                                       #
+# Permission is hereby granted, free of charge, to any person obtaining a copy of this  #
+# software and associated documentation files (the "Software"), to deal in the Software #
+# without restriction, including without limitation the rights to use, copy, modify,    #
+# merge, publish, distribute, sublicense, and/or sell copies of the Software, and to    #
+# permit persons to whom the Software is furnished to do so.                            #
+#                                                                                       #
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,   #
+# INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A         #
+# PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT    #
+# HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION     #
+# OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE        #
+# SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                                #
+#########################################################################################
+
+AWSTemplateFormatVersion: '2010-09-09'
+Description: AWS CloudFormation template for Cloud9 MGN/DRS Service Catalog Setup
+Parameters:
+  pCloud9InstanceType:
+    Description: Example Cloud9 instance type
+    Type: String
+    Default: t3.small
+    AllowedValues:
+      - t2.micro
+      - t3.micro
+      - t3.small
+      - t3.medium
+    ConstraintDescription: Must be a valid Cloud9 instance type
+  pCloud9InstanceVolumeSize: 
+    Type: Number
+    Description: The Size in GB of the Cloud9 Instance Volume. 
+    Default: 15
+  pS3BucketOwner:
+    Type: String
+    Description: Owner of the S3 Bucket Deployed for Service Catalog Setup
+    Default: CloudPlatformTeam
+  pMGNDRSServiceCatalogCodeZipUrl:
+    Type: String
+    Description: URL for MGN/DRS code zip - either from GitHub or downloaded zip from GitHub and placed in S3
+    Default: https://github.com/aws-samples/aws-mgn-drs-init-automation/archive/refs/heads/main.zip
+  pServiceCatalogEndUserRoleName:
+    Type: String
+    Description: Name of role for Service Catalog End User
+    Default: ServiceCatalogEndUserRole
+  pCloud9SubnetId:
+    Type: AWS::EC2::Subnet::Id
+    Description: Subnet ID for the Subnet to Attach Cloud9 (Note - This subnet must be able to reach the AWS Cloud9 Service Endpoint and have a route the internet for fetching dependencies from GitHub)
+
+Resources:
+################## PERMISSIONS AND ROLES #################
+  rMGNDRSServiceCatalogC9Role:
+    Metadata:
+      cfn_nag:
+          rules_to_suppress:
+          - id: F3
+            reason: "Required for Read Actions"
+          - id: W11
+            reason: "Simulating a administrator user for setting up the MGN/DRS initialization solution."
+          - id: W28
+            reason: "Explict name required for AWS Blog"
+          - id: W43
+            reason: "Simulating a administrator user for setting up the MGN/DRS initialization solution."
+          - id: W76
+            reason: "Consolidating policy actions for AWS Blog content"
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: cloud9-mgn-drs
+      Tags:
+        - Key: Environment
+          Value: AWS Example
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - ec2.amazonaws.com
+            - ssm.amazonaws.com
+          Action:
+          - sts:AssumeRole
+      Policies:
+      - PolicyName:
+          Fn::Join:
+          - ''
+          - - C9InstancePolicy-
+            - Ref: AWS::Region
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Sid: STSGet
+            Effect: Allow
+            Action:
+            - sts:GetCallerIdentity
+            Resource: "*"
+          - Sid: STSAssumeRole
+            Effect: Allow
+            Action:
+            - sts:AssumeRole
+            Resource: arn:aws:iam::*:role/*
+          - Sid: CloudFormationDescribe
+            Effect: Allow
+            Action:
+            - cloudformation:Describe*
+            - cloudformation:List*
+            Resource: !Sub arn:aws:cloudformation:*:${AWS::AccountId}:stack/*
+          - Sid: OrganizationsDescribe
+            Effect: Allow
+            Action:
+            - organizations:DescribeOrganization
+            Resource: "*"
+          - Sid: EC2Describe
+            Effect: Allow
+            Action:
+            - ec2:Describe*
+            - ec2:Get*
+            Resource: "*"
+          - Sid: EC2Setup
+            Effect: Allow
+            Action:
+            - ec2:*Modify*
+            - ec2:DisassociateIamInstanceProfile
+            - ec2:AssociateIamInstanceProfile
+            Resource: 
+              - !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:volume/*
+              - !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:instance/*
+          - Sid: CloudFormationWrite
+            Effect: Allow
+            Action:
+            - cloudformation:CreateStack
+            - cloudformation:DeleteStack
+            - cloudformation:UpdateStack
+            - cloudformation:ExecuteChangeSet
+            - cloudformation:UpdateStack
+            - cloudformation:RollbackStack
+            - cloudformation:SignalResource
+            - cloudformation:ValidateTemplate
+            - cloudformation:TagResource
+            - cloudformation:UntagResource
+            Resource: 
+              - !Sub arn:aws:cloudformation:*:${AWS::AccountId}:stack/*MGN-DRS-Init-Service-Catalog*
+              - !Sub arn:aws:cloudformation:*:${AWS::AccountId}:stack/*Service-Catalog-Product-S3*
+              - !Sub arn:aws:cloudformation:*:${AWS::AccountId}:stack/*IAM-Service-Catalog-Launch-Constraint*
+          - Sid: CloudFormationRead
+            Effect: Allow
+            Action:
+            - cloudformation:ValidateTemplate
+            - cloudformation:Get*
+            - cloudformation:List*
+            - cloudformation:Describe*
+            Resource: "*"
+          - Sid: S3Bucket
+            Effect: Allow
+            Action:
+            - s3:CreateBucket
+            - s3:DeleteBucket
+            - s3:PutObject
+            - s3:DeleteObject
+            - s3:PutBucketPolicy
+            - s3:DeleteBucketPolicy
+            - s3:PutBucketTagging
+            - s3:PutObjectTagging
+            - s3:DeleteObjectTagging
+            - s3:GetEncryptionConfiguration
+            - s3:PutEncryptionConfiguration
+            - s3:PutBucketVersioning
+            - s3:PutBucketPublicAccessBlock
+            Resource:
+              - arn:aws:s3:::*rmgndrsservicecatalog*/*
+              - arn:aws:s3:::*rmgndrsservicecatalog*
+              - arn:aws:s3:::*rs3servicecatalog*/*
+              - arn:aws:s3:::*rs3servicecatalog*
+              - !Sub arn:aws:s3:::*/*${AWS::StackName}-pmgndrsservicecatalogc9outputbucket*
+              - !Sub arn:aws:s3:::*/*service-catalog-product-rs3servicecatalogproduct*
+          - Sid: S3Read
+            Effect: Allow
+            Action:
+            - s3:Get*
+            - s3:List*
+            - s3:DeleteObjectTagging
+            Resource:
+              - arn:aws:s3:::*rmgndrsservicecatalog*/*
+              - arn:aws:s3:::*rmgndrsservicecatalog*
+              - arn:aws:s3:::*rs3servicecatalog*/*
+              - arn:aws:s3:::*rs3servicecatalog*
+              - !Sub arn:aws:s3:::*/*${AWS::StackName}-pmgndrsservicecatalogc9outputbucket*
+              - !Sub arn:aws:s3:::*/*service-catalog-product-rs3servicecatalogproduct*
+          - Sid: IAMRead
+            Effect: Allow
+            Action:
+            - iam:Get*
+            - iam:List*
+            - iam:SimulatePrincipalPolicy
+            Resource:
+              - !Sub arn:aws:iam::${AWS::AccountId}:role/*
+              - !Sub arn:aws:iam::${AWS::AccountId}:policy/*
+          - Sid: IAMGetCreate
+            Effect: Allow
+            Action:
+            - iam:PutRolePolicy
+            - iam:AttachRolePolicy
+            - iam:DetachRolePolicy
+            - iam:CreateRole
+            - iam:PutRole*
+            - iam:DeleteRole
+            - iam:DeleteRolePolicy
+            Resource:
+              - !Sub arn:aws:iam::${AWS::AccountId}:role/ServiceCatalogEndUserRole
+              - !Sub arn:aws:iam::${AWS::AccountId}:role/MGNDRSServiceCatalogLaunchConstraintRole
+              - !Sub arn:aws:iam::${AWS::AccountId}:role/MGN-DRS-Init*
+          - Sid: ServiceCatalogCreate
+            Effect: Allow
+            Action:
+            - servicecatalog:CreatePortfolio
+            - servicecatalog:CreateProduct
+            - servicecatalog:DeletePortfolio
+            - servicecatalog:DeleteProduct
+            - servicecatalog:CreatePortfolioShare
+            - servicecatalog:DeletePortfolioShare
+            - servicecatalog:AssociatePrincipalWithPortfolio
+            - servicecatalog:DisassociatePrincipalFromPortfolio
+            - servicecatalog:AssociateProductWithPortfolio
+            - servicecatalog:DisassociateProductFromPortfolio
+            - servicecatalog:CreateConstraint
+            - servicecatalog:DeleteConstraint
+            - servicecatalog:UpdateConstraint
+            - servicecatalog:TagResource
+            - servicecatalog:UntagResource
+            Resource:
+              - !Sub arn:aws:servicecatalog:${AWS::Region}:${AWS::AccountId}:portfolio/*
+              - !Sub arn:aws:servicecatalog:${AWS::Region}:${AWS::AccountId}:product/*
+              - !Sub arn:aws:catalog:${AWS::Region}:${AWS::AccountId}:portfolio/*
+              - !Sub arn:aws:catalog:${AWS::Region}:${AWS::AccountId}:product/*
+          - Sid: ServiceCatalogRead
+            Effect: Allow
+            Action:
+            - servicecatalog:Describe*
+            - servicecatalog:List*
+            - servicecatalog:Get*
+            Resource: "*"
+          - Sid: LambdaCreate
+            Effect: Allow
+            Action:
+            - lambda:CreateFunction
+            - lambda:DeleteFunction
+            - lambda:GetFunction
+            - lambda:InvokeFunction
+            Resource:
+              - !Sub arn:aws:lambda:*:${AWS::AccountId}:function:*rCreateSCPortfolio*
+              - !Sub arn:aws:lambda:*:${AWS::AccountId}:function:*MGNDRS*
+          - Sid: IAMPassRole
+            Effect: Allow
+            Action: 
+              - iam:PassRole
+            Resource: 
+              - !Sub arn:aws:iam::${AWS::AccountId}:role/cloud9-mgn-drs
+              - !Sub arn:aws:iam::${AWS::AccountId}:role/MGNDRSServiceCatalogLaunchConstraintRole
+              - !Sub arn:aws:iam::${AWS::AccountId}:role/MGN-DRS-Init*
+          - Sid: SSMManagedInstance
+            Effect: Allow
+            Action:
+              - ssm:*
+              - ssmmessages:*
+              - ec2messages:*
+              - config:Describe*
+            Resource: "*"
+
+  rMGNDRSServiceCatalogC9LambdaExecutionRole:
+    Metadata:
+      cfn_nag:
+          rules_to_suppress:
+          - id: W11
+            reason: "Consolidating actions to enable solution setup"
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - lambda.amazonaws.com
+          Action:
+          - sts:AssumeRole
+          Condition:
+            StringEquals:
+              aws:SourceArn: 
+                - !Sub arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:MGNDRSC9BootstrapInstanceLambdaFunction
+                - !Sub arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:MGNDRServiceCatalogCFStackWaitLambdaFunction
+      Path: "/"
+      Policies:
+      - PolicyName:
+          Fn::Join:
+          - ''
+          - - C9LambdaPolicy-
+            - Ref: AWS::Region
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - logs:CreateLogGroup
+            - logs:CreateLogStream
+            - logs:PutLogEvents
+            Resource: arn:aws:logs:*:*:*
+          - Effect: Allow
+            Action:
+            - cloudformation:DescribeStacks
+            - cloudformation:DescribeStackEvents
+            - cloudformation:DescribeStackResource
+            - cloudformation:DescribeStackResources
+            - ec2:DescribeInstances
+            - ec2:AssociateIamInstanceProfile
+            - ec2:ModifyInstanceAttribute
+            - ec2:ReplaceIamInstanceProfileAssociation
+            - iam:ListInstanceProfiles
+            - ssm:ListCommandInvocations
+            Resource: "*"
+          - Effect: Allow
+            Action:
+            - s3:List*
+            - s3:Get*
+            Resource: "*"
+          - Effect: Allow
+            Action:
+            - s3:CreateBucket
+            - s3:PutBucket*
+            - s3:PutObject*
+            Resource: 
+              - !Sub arn:aws:s3:::bucket/${AWS::StackName}-pmgndrsservicecatalogc9outputbucket*
+              - !Sub arn:aws:s3:::bucket/service-catalog-product-rs3servicecatalogproduct*
+          - Effect: Allow
+            Action: iam:PassRole
+            Resource: !Sub arn:aws:iam::${AWS::AccountId}:role/cloud9-mgn-drs
+
+################## LAMBDA BOOTSTRAP FUNCTION ################
+
+  pMGNDRSServiceCatalogC9BootstrapCustomResource:
+    Type: Custom::MGNDRSServiceCatalogC9BootstrapCustomResource
+    Properties:
+      Tags:
+        - Key: SSMBootstrap
+          Value: Active
+      ServiceToken:
+        Fn::GetAtt:
+        - pMGNDRSC9BootstrapInstanceLambdaFunction
+        - Arn
+      REGION:
+        Ref: AWS::Region
+      StackName:
+        Ref: AWS::StackName
+      EnvironmentId:
+        Ref: pMGNDRSServiceCatalogC9Instance
+      LabIdeInstanceProfileName:
+        Ref: pMGNDRSServiceCatalogC9InstanceProfile
+      LabIdeInstanceProfileArn:
+        Fn::GetAtt:
+        - pMGNDRSServiceCatalogC9InstanceProfile
+        - Arn
+
+  pMGNDRSC9BootstrapInstanceLambdaFunction:
+    Metadata:
+      cfn_nag:
+          rules_to_suppress:
+          - id: W89
+            reason: "Not a valid use case for Lambda functions to be deployed inside a VPC."
+          - id: W92
+            reason: "Not a valid use case for Lambda reserved concurrency."
+      checkov:
+        skip:
+          - id: CKV_AWS_115
+            comment: Function will be invoked once per Service Catalog Product deployment
+          - id: CKV_AWS_116
+            comment: CloudFormation custom resource Lambda - use CloudWatch logs for troubleshooting
+          - id: CKV_AWS_117
+            comment: Not a valid use case for Lambda function to be deployed inside a VPC
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: MGNDRSC9BootstrapInstanceLambdaFunction
+      Tags:
+        - Key: Environment
+          Value: AWS Example
+      Handler: index.lambda_handler
+      Role: !GetAtt rMGNDRSServiceCatalogC9LambdaExecutionRole.Arn
+      Runtime: python3.7
+      MemorySize: 256
+      Timeout: '600'
+      Code:
+        ZipFile: |
+          from __future__ import print_function
+          import boto3
+          import json
+          import os
+          import time
+          import traceback
+          import cfnresponse
+
+          def lambda_handler(event, context):
+              print('Event Info')
+              print(json.dumps(event))
+              responseData = {"status": 'Success'}
+              # cfnresponse.send(event, context, cfnresponse.SUCCESS, responseData, 'CustomResourcePhysicalID')
+
+              # logger.info('context: {}'.format(context))
+              responseData = {}
+              ec2 = boto3.client('ec2')
+              if event['RequestType'] == 'Create':
+                  try:
+                      # Get the InstanceId of the Cloud9 IDE
+                      instance_details = ec2.describe_instances(Filters=[{'Name': 'tag:SSMBootstrap', 'Values': ["Active"]},
+                                                                  {'Name': 'instance-state-name', 'Values': ['running']}])
+                      if instance_details:
+                          instance = instance_details['Reservations'][0]['Instances'][0]
+                          # Create the IamInstanceProfile request object
+                          iam_instance_profile = {
+                              'Arn': event['ResourceProperties']['LabIdeInstanceProfileArn'],
+                              'Name': event['ResourceProperties']['LabIdeInstanceProfileName']
+                          }
+                          instance_state = instance['State']['Name']
+                          print("instance state: " + instance_state)
+                          while instance_state != 'running':
+                              time.sleep(5)
+                              instance_state = ec2.describe_instances(InstanceIds=[instance['InstanceId']])
+
+                          # attach instance profile
+                          response = ec2.associate_iam_instance_profile(IamInstanceProfile=iam_instance_profile, InstanceId=instance['InstanceId'])
+                          responseData = {'Success': 'Attached instance profile to instance: '+instance['InstanceId']}
+                          cfnresponse.send(event, context, cfnresponse.SUCCESS, responseData, 'CustomResourcePhysicalID')
+                      else:
+                          print("No Cloud9 instances can be found")
+                  except Exception as e:
+                      print("Error associating instance profile to Cloud9 instance")
+                      print(traceback.format_exc())
+                      responseData = {'Error': str(e)}
+                      cfnresponse.send(event, context, cfnresponse.FAILED, responseData, 'CustomResourcePhysicalID')
+              else:
+                responseData = {'Success': 'Delete or Update operations not supported so skipping'}
+                cfnresponse.send(event, context, cfnresponse.SUCCESS, responseData, 'CustomResourcePhysicalID')
+                    
+################## SSM BOOTSRAP HANDLER ###############
+  pMGNDRSServiceCatalogC9OutputBucket:
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+        - id: W51
+          reason: "Metadata collection for Cloud9 Bootstrapping"
+        - id: W35
+          reason: "Metadata collection for Cloud9 Bootstrapping"
+        - id: W41
+          reason: "Bucket encrypted with AWS managed keys by default"
+      checkov:
+        skip:
+          - id: CKV_AWS_21
+            comment: Versioning not required for this bucket
+          - id: CKV_AWS_18
+            comment: Bucket intended to contain packaged Lambda binaries from public repo
+    Type: AWS::S3::Bucket
+    Properties:
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+
+  pMGNDRSServiceCatalogMGNC9SSMDocument: 
+    Type: AWS::SSM::Document
+    Properties: 
+      Tags:
+        - Key: Environment
+          Value: AWS Example
+      DocumentFormat: YAML
+      DocumentType: Command
+      Content: 
+        schemaVersion: '2.2'
+        description: Bootstrap Cloud9 Instance
+        mainSteps:
+        - action: aws:runShellScript
+          name: C9bootstrap
+          inputs:
+            runCommand:
+            - "#!/bin/bash"
+            - date
+            - echo LANG=en_US.utf-8 >> /etc/environment
+            - echo LC_ALL=en_US.UTF-8 >> /etc/environment
+            - . /home/ec2-user/.bashrc
+            - yum -y remove aws-cli; yum -y install sqlite telnet jq strace tree gcc glibc-static python3 python3-pip gettext bash-completion
+            - echo '=== CONFIGURE default python version ==='
+            - PATH=$PATH:/usr/bin
+            - alternatives --set python /usr/bin/python3.7
+            - echo '=== INSTALL and CONFIGURE default software components ==='
+            - sudo -H -u ec2-user bash -c "pip install --user -U boto boto3 botocore awscli aws-sam-cli"
+            - echo '=== Upgrading AWS CLI Version'
+            - curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+            - unzip awscliv2.zip
+            - sudo ./aws/install
+            - echo '=== Resizing the Instance volume'
+            - !Sub SIZE=${pCloud9InstanceVolumeSize}
+            - !Sub REGION=${AWS::Region}
+            - |
+              INSTANCEID=$(curl http://169.254.169.254/latest/meta-data/instance-id)
+              VOLUMEID=$(aws ec2 describe-instances \
+                --instance-id $INSTANCEID \
+                --query "Reservations[0].Instances[0].BlockDeviceMappings[0].Ebs.VolumeId" \
+                --output text --region $REGION)
+              aws ec2 modify-volume --volume-id $VOLUMEID --size $SIZE --region $REGION
+              while [ \
+                "$(aws ec2 describe-volumes-modifications \
+                  --volume-id $VOLUMEID \
+                  --filters Name=modification-state,Values="optimizing","completed" \
+                  --query "length(VolumesModifications)"\
+                  --output text --region $REGION)" != "1" ]; do
+              sleep 1
+              done
+              if [ $(readlink -f /dev/xvda) = "/dev/xvda" ]
+              then
+                sudo growpart /dev/xvda 1
+                STR=$(cat /etc/os-release)
+                SUB="VERSION_ID=\"2\""
+                if [[ "$STR" == *"$SUB"* ]]
+                then
+                  sudo xfs_growfs -d /
+                else
+                  sudo resize2fs /dev/xvda1
+                fi
+              else
+                sudo growpart /dev/nvme0n1 1
+                STR=$(cat /etc/os-release)
+                SUB="VERSION_ID=\"2\""
+                if [[ "$STR" == *"$SUB"* ]]
+                then
+                  sudo xfs_growfs -d /
+                else
+                  sudo resize2fs /dev/nvme0n1p1
+                fi
+              fi
+            - echo '=== CONFIGURE awscli and setting ENVIRONMENT VARS ==='
+            - echo "complete -C '/usr/local/bin/aws_completer' aws" >> /home/ec2-user/.bashrc
+            - mkdir /home/ec2-user/.aws
+            - echo '[default]' > /home/ec2-user/.aws/config
+            - echo 'output = json' >> /home/ec2-user/.aws/config
+            - chmod 600 /home/ec2-user/.aws/config && chmod 600 /home/ec2-user/.aws/credentials
+            - echo 'PATH=$PATH:/usr/local/bin' >> /home/ec2-user/.bashrc
+            - echo 'export PATH' >> /home/ec2-user/.bashrc
+            - echo '=== CLEANING /home/ec2-user ==='
+            - for f in cloud9; do rm -rf /home/ec2-user/$f; done
+            - chown -R ec2-user:ec2-user /home/ec2-user/
+            - echo '=== PREPARE REBOOT in 1 minute with at ==='
+            - FILE=$(mktemp) && echo $FILE && echo '#!/bin/bash' > $FILE && echo 'reboot -f --verbose' >> $FILE && at now + 1 minute -f $FILE
+            - echo "Moving to ec2-user environment directory (/home/ec2-user/environment)..."
+            - cd /home/ec2-user/environment
+            - pwd
+            - !Sub echo "Running Command == wget -O main.zip ${pMGNDRSServiceCatalogCodeZipUrl}"
+            - !Sub wget -O main.zip "${pMGNDRSServiceCatalogCodeZipUrl}"
+            - chown -R ec2-user:ec2-user /home/ec2-user/environment/main.zip
+            - unzip -u main.zip
+            - mv aws-mgn-drs-init-automation-main mgn_drs_setup_automation
+            - cd mgn_drs_setup_automation
+            - !Sub echo "Running Command == ./scripts/service-catalog-admin-account-setup.sh ${AWS::Region} ${pS3BucketOwner} ${pServiceCatalogEndUserRoleName}"
+            - !Sub ./scripts/service-catalog-admin-account-setup.sh ${AWS::Region} ${pS3BucketOwner} ${pServiceCatalogEndUserRoleName}
+            - echo "Bootstrap completed with return code $?"
+  
+  pMGNDRSServiceCatalogCloud9BootstrapAssociation: 
+    Type: AWS::SSM::Association
+    DependsOn: 
+      - pMGNDRSServiceCatalogC9BootstrapCustomResource
+    Properties: 
+      Name: !Ref pMGNDRSServiceCatalogMGNC9SSMDocument
+      OutputLocation: 
+        S3Location:
+          OutputS3BucketName: !Ref pMGNDRSServiceCatalogC9OutputBucket
+          OutputS3KeyPrefix: bootstrapoutput
+      Targets:
+        - Key: tag:SSMBootstrap
+          Values:
+          - Active
+
+################## INSTANCE #####################
+  pMGNDRSServiceCatalogC9InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Path: "/"
+      Roles:
+      - Ref: rMGNDRSServiceCatalogC9Role
+
+  pMGNDRSServiceCatalogC9Instance:
+    Type: AWS::Cloud9::EnvironmentEC2
+    Properties:
+      Description: "Cloud 9 environment to install MGN pre-reqs"
+      AutomaticStopTimeMinutes: 1800
+      SubnetId: !Ref pCloud9SubnetId
+      ImageId: amazonlinux-2-x86_64 
+      InstanceType:
+        Ref: pCloud9InstanceType
+      Name:
+        Ref: AWS::StackName
+      Tags: 
+        - 
+          Key: SSMBootstrap
+          Value: Active
+        - 
+          Key: Environment
+          Value: MGN-Cloud9
+
+  pMGNDRSServiceCatalogCustomResourceSSMDocumentWait:
+    Type: Custom::MGNDRSServiceCatalogCustomResourceSSMDocumentWait
+    Properties:
+      Tags:
+        - Key: RUNCOMMANDWAIT
+          Value: Active
+      ServiceToken:
+        Fn::GetAtt:
+        - pMGNDRSServiceCatalogSSMWaitLambdaFunction
+        - Arn
+      Region:
+        Ref: AWS::Region
+      StackName:
+        Ref: AWS::StackName
+      EnvironmentId:
+        Ref: pMGNDRSServiceCatalogC9Instance
+
+  pMGNDRSServiceCatalogSSMWaitLambdaFunction:
+    Type: AWS::Lambda::Function
+    Metadata:
+      cfn_nag:
+          rules_to_suppress:
+          - id: W89
+            reason: "Not a valid use case for Lambda functions to be deployed inside a VPC."
+          - id: W92
+            reason: "Not a valid use case for Lambda reserved concurrency."
+      checkov:
+        skip:
+          - id: CKV_AWS_115
+            comment: Function will be invoked once per Service Catalog Product deployment
+          - id: CKV_AWS_116
+            comment: CloudFormation custom resource Lambda - use CloudWatch logs for troubleshooting
+          - id: CKV_AWS_117
+            comment: Not a valid use case for Lambda function to be deployed inside a VPC
+    DependsOn: pMGNDRSServiceCatalogMGNC9SSMDocument
+    Properties:
+      FunctionName: MGNDRServiceCatalogCFStackWaitLambdaFunction
+      Tags:
+        - Key: Environment
+          Value: AWS Example
+      Handler: index.lambda_handler
+      Role: !GetAtt rMGNDRSServiceCatalogC9LambdaExecutionRole.Arn
+      Runtime: python3.7
+      MemorySize: 256
+      Timeout: '900'
+      Code:
+        ZipFile: |
+          from __future__ import print_function
+          import boto3
+          import json
+          import os
+          import time
+          import traceback
+          import cfnresponse
+          import sys
+
+          def fetch_service_catalog_cfn_stack(stack_name, region, iter=180):
+            try:
+              stack = boto3.client('cloudformation', region_name=region)
+              while True:
+                try:
+                  response = stack.describe_stacks(
+                      StackName=stack_name
+                  )
+                  if('FAILED' in response['Stacks'][0]['StackStatus'] or 'ROLLBACK' in response['Stacks'][0]['StackStatus'] ):
+                      raise ValueError("The CloudFormation Stack Creation Failed")
+                      cfnresponse.send(event, context, cfnresponse.FAILED, responseData, 'CustomResourcePhysicalID')
+                  if('CREATE_COMPLETE' == response['Stacks'][0]['StackStatus']):
+                      return response
+                  print("Waiting for failed or complete CloudFormation Stack...")
+                  time.sleep(20)
+                except stack.exceptions.ClientError:
+                  print(f"Stack {stack_name} doesn't exist, waiting...")
+                  time.sleep(5)
+                  iter -= 1
+                  if iter == 0:
+                      raise TimeoutError("The CloudFormation Stack creation has timed-out, exiting...")
+                  continue
+            except stack.exceptions.ClientError as error:
+              raise error
+            except ValueError as error:
+              raise error
+            except Exception as error:
+              raise error
+
+          def lambda_handler(event, context):
+            print('Event Info')
+            print(json.dumps(event))
+            responseData = {"status": 'Success'}
+
+            region = event['ResourceProperties']['Region']
+            responseData = {}
+            if event['RequestType'] == 'Create': 
+              try: 
+                response = fetch_service_catalog_cfn_stack("MGN-DRS-Init-Service-Catalog", region)
+                print("The Service Catalog CloudFormation Stack has been created...")
+                cfnresponse.send(event, context, cfnresponse.SUCCESS, responseData, 'CustomResourcePhysicalID')
+              except Exception as e:
+                print("Error Creating the Service Catalog Stack")
+                print(traceback.format_exc())
+                responseData = {'Error': str(e)}
+                cfnresponse.send(event, context, cfnresponse.FAILED, responseData, 'CustomResourcePhysicalID')
+            else:
+              responseData = {'Success': 'Delete or Update operations not supported so skipping'}
+              cfnresponse.send(event, context, cfnresponse.SUCCESS, responseData, 'CustomResourcePhysicalID')
+
+Outputs: 
+  oCloud9IDE:
+    Description: URL for the Cloud9 Environment Console
+    Value:
+      Fn::Join:
+      - ''
+      - - https://
+        - Ref: AWS::Region
+        - ".console.aws.amazon.com/cloud9/ide/"
+        - Ref: pMGNDRSServiceCatalogC9Instance
+        - "?region="
+        - Ref: AWS::Region
+  oCloud9InstanceRoleArn:
+    Description: ARN for the IAM Instance Role attached to this Cloud9 EC2 instance
+    Value: !GetAtt rMGNDRSServiceCatalogC9Role.Arn
+
+

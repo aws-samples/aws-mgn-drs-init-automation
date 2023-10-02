@@ -1,0 +1,377 @@
+#########################################################################################
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.                    #
+# SPDX-License-Identifier: MIT-0                                                        #
+#                                                                                       #
+# Permission is hereby granted, free of charge, to any person obtaining a copy of this  #
+# software and associated documentation files (the "Software"), to deal in the Software #
+# without restriction, including without limitation the rights to use, copy, modify,    #
+# merge, publish, distribute, sublicense, and/or sell copies of the Software, and to    #
+# permit persons to whom the Software is furnished to do so.                            #
+#                                                                                       #
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,   #
+# INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A         #
+# PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT    #
+# HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION     #
+# OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE        #
+# SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                                #
+#########################################################################################
+
+AWSTemplateFormatVersion: 2010-09-09
+Description: This template initializes MGN, creates the necessary service roles and configures replication settings
+
+Parameters: 
+  pReplicationSubnetId:
+    Description: Subnet Id for Replication Server
+    Type: AWS::EC2::Subnet::Id
+  pReplicationInstanceType:
+    Description: Replication Server Instance Type
+    Default: "t3.small"
+    Type: String
+  pReplicationSecurityGroupIds:
+    Description: Security Group Ids for Replication Servers
+    Type: List<AWS::EC2::SecurityGroup::Id>
+  pKMSKeyArn:
+    Description: ARN of KMS Key for EBS Encryption (Leave blank for Amazon Managed KMS)
+    Type: String
+  pReplicationServerTags:
+    Description: Tags for replication servers (Please specify in KEY:VALUE format. Multiple entries can be comma separated)
+    Type: CommaDelimitedList
+    Default: ""
+  pCreateReplicationSecurityGroup:
+    Description: Create default replication security group
+    Type: String
+    Default: 'No'
+    AllowedValues:
+      - 'Yes'
+      - 'No'
+  pReplicationServerPublicIp:
+    Description: Use Public IP for Replication server control plane traffic
+    Type: String
+    Default: 'No'
+    AllowedValues:
+      - 'Yes'
+      - 'No'
+  pReplicationServerDataRouting:
+    Description: Replication Server data plane traffic connectivity
+    Type: String
+    Default: PRIVATE_IP
+    AllowedValues:
+      - PUBLIC_IP
+      - PRIVATE_IP
+  pReplicationDataThrottling:
+    Description: Throttle Replication traffic. (Set to 0 to use all available bandwidth on source server or else specify a value to limit bandwidth usage)
+    Type: Number
+    Default: 0
+  pReplicationStagingDiskType:
+    Description: Replication Server staging disk type
+    Type: String
+    Default: 'GP3'
+    AllowedValues:
+      - 'GP3'
+      - 'GP2'
+      - 'ST1'
+  pUseDedicatedReplicationServer:
+    Description: Use dedicated replication server for each source machine
+    Type: String
+    Default: 'No'
+    AllowedValues:
+      - 'Yes'
+      - 'No'
+
+Metadata: 
+  AWS::CloudFormation::Interface: 
+    ParameterGroups: 
+      - 
+        Label: 
+          default: "Replication Server Settings"
+        Parameters: 
+          - pReplicationInstanceType
+          - pReplicationStagingDiskType
+          - pUseDedicatedReplicationServer
+          - pKMSKeyArn
+          - pReplicationServerTags
+      - 
+        Label: 
+          default: "Replication Network Setting"
+        Parameters: 
+          - pReplicationSubnetId
+          - pReplicationSecurityGroupIds
+          - pReplicationServerPublicIp
+          - pReplicationServerDataRouting
+          - pReplicationDataThrottling
+          - pCreateReplicationSecurityGroup
+
+    ParameterLabels: 
+      pReplicationSubnetId: 
+        default: "Replication Server Subnet"
+      pReplicationSecurityGroupIds:
+        default: "Replication Server Security Groups"
+      pReplicationInstanceType:
+        default: "Replication Server Instance Type"
+      pKMSKeyArn:
+        default: "KMS Key ARN for EBS encryption"
+      pReplicationServerTags:
+        default: "Tags to be applied to replication server"
+      pCreateReplicationSecurityGroup:
+        default: "Create new replication security group"
+      pReplicationServerPublicIp:
+        default: "Use Public IP for Replication server control plane traffic"
+      pReplicationServerDataRouting:
+        default: "Replication Server data plane traffic connectivity"
+      pReplicationDataThrottling:
+        default: "Replication Bandwidth limit in MB"
+      pReplicationStagingDiskType:
+        default: "Replication Server staging disk type"
+      pUseDedicatedReplicationServer:
+        default: "Use dedicated replication server for each source machine"
+
+Conditions:
+  cDefaultKMS:
+    !Equals [!Ref pKMSKeyArn, ""]
+
+Resources:
+
+  rMGNInitializerLambdaIamRole:
+    Metadata:
+      cfn_nag:
+          rules_to_suppress:
+          - id: W11
+            reason: "Resource Wildcard required for dynamic resource creation"
+      checkov:
+        skip:
+          - id: CKV_AWS_111
+            comment: "Resource Wildcard required for dynamic resource creation"
+          - id: CKV_AWS_107
+            comment: "Lambda not logging sensitive data"
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - lambda.amazonaws.com
+          Action:
+          - sts:AssumeRole
+          Condition:
+            StringEquals:
+              aws:SourceArn: !Sub arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:MGNInitializer
+      Path: "/"
+      Policies:
+        - PolicyName: MGNInitializerAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+            - Sid: LambdaLogging
+              Effect: Allow
+              Action:
+              - logs:CreateLogGroup
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+              Resource: arn:aws:logs:*:*:*
+            - Sid: EC2Access
+              Effect: Allow
+              Action:
+              - ec2:CreateSecurityGroup
+              - ec2:CreateTags
+              - ec2:Describe*
+              - ec2:Get*
+              Resource: "*"
+            - Sid: AllowIAMCreationforServiceInitialization
+              Effect: Allow
+              Action:
+              - iam:CreateInstanceProfile
+              - iam:CreateServiceLinkedRole
+              - iam:DeleteServiceLinkedRole
+              - iam:AddRoleToInstanceProfile
+              - iam:CreateRole
+              - iam:DeleteRole
+              Resource:
+              - !Sub arn:aws:iam::${AWS::AccountId}:role/service-role/AWSApplicationMigration*
+              - !Sub arn:aws:iam::${AWS::AccountId}:instance-profile/AWSApplicationMigration*
+              - !Sub arn:aws:iam::${AWS::AccountId}:role/aws-service-role/mgn.amazonaws.com/AWSServiceRoleForApplicationMigrationService
+            - Sid: IAMGetInstanceProfile
+              Effect: Allow
+              Action: iam:GetInstanceProfile
+              Resource: "*"
+            - Sid: MGNAccess
+              Effect: Allow
+              Action:
+              - mgn:InitializeService
+              - mgn:CreateReplicationConfigurationTemplate
+              - mgn:UpdateReplicationConfigurationTemplate
+              - mgn:DeleteReplicationConfigurationTemplate
+              Resource: "*"
+            - Sid: KMSAccess
+              Effect: Allow
+              Action:
+              - kms:CreateGrant
+              - kms:DescribeKey
+              Resource:
+              - !If [ cDefaultKMS, !Sub "arn:aws:kms:${AWS::Region}:${AWS::AccountId}:key/PLACEHOLDER_KEY_ID", !Ref pKMSKeyArn ]
+            - Sid: PassRoleMGN
+              Effect: Allow
+              Action: iam:PassRole
+              Resource: 
+                - !Sub "arn:aws:iam::${AWS::AccountId}:role/AWSApplicationMigration*"
+                - !Sub "arn:aws:iam::${AWS::AccountId}:role/service-role/AWSApplicationMigration*"
+
+  rMGNInitializerLambdaFunction:
+    Metadata:
+      cfn_nag:
+          rules_to_suppress:
+          - id: W92
+            reason: "Function will invoke individually for service initalization"
+          - id: W89
+            reason: "Function does not access VPC attached resources and should not have VPC dependency"
+      checkov:
+        skip:
+          - id: CKV_AWS_115
+            comment: Function will be invoked once per Service Catalog Product deployment
+          - id: CKV_AWS_116
+            comment: CloudFormation custom resource Lambda - use CloudWatch logs for troubleshooting
+          - id: CKV_AWS_117
+            comment: Not a valid use case for Lambda function to be deployed inside a VPC
+    Type: AWS::Lambda::Function
+    Properties:
+      Description: Performs MGN initalization and configures replication setting
+      FunctionName: MGNInitializer
+      Handler: index.lambda_handler
+      MemorySize: 128
+      Role: !GetAtt rMGNInitializerLambdaIamRole.Arn
+      Runtime: python3.8
+      Timeout: 60
+      Code:
+        ZipFile: |
+          import boto3
+          import botocore
+          import json
+          import cfnresponse
+
+          mgn = boto3.client('mgn')
+          kms = boto3.client('kms')
+
+          def convert_list_to_dict(tags):
+            tag_d = {}
+            for tag in tags:
+              k,v = tag.split(":", 1)
+              tag_d[k] = v
+            return tag_d
+
+          def create_kms_grant(kmsKey, grantee):
+            response = kms.create_grant(
+              KeyId=kmsKey,
+              GranteePrincipal=grantee,
+              RetiringPrincipal=grantee,
+              Operations=['Decrypt','Encrypt','GenerateDataKey','GenerateDataKeyWithoutPlaintext','CreateGrant','DescribeKey'],
+              Name='ApplicationMigrationService'
+          )
+
+          def lambda_handler(event, context):
+            print(json.dumps(event))
+            request_params = event['ResourceProperties']
+            request_type = event['RequestType']
+            if request_params['KMSKeyArn'] != '':
+              kmsKeyArn = request_params['KMSKeyArn']
+            else:
+              kmsKeyArn = None
+            instanceType = request_params['ReplicationInstanceType']
+            securityGroupIds = request_params['ReplicationSecurityGroupIds']
+            subnet = request_params['StagingSubnetId']
+            dataRouting = request_params['ReplicationDataRouting']
+            diskType = request_params['StagingDiskType']
+            bandwitdh = request_params['ReplicationBandwidthInMB']
+            dedicatedReplicationServer = False
+            createSecurityGroup = False
+            publicIp = False
+
+            if (request_params['CreateReplicationSecurityGroup']) == 'Yes':
+              createSecurityGroup = True
+            if (request_params['CreatePublicIp']) == 'Yes':
+              publicIp = True
+            if (request_params['UseDedicatedReplicationServer']) == 'Yes':
+              dedicatedReplicationServer = True
+
+            tags = request_params['Tags']
+            stagingTags = convert_list_to_dict(tags)
+
+            rep_config_req_params = {}
+            rep_config_req_params['associateDefaultSecurityGroup']=createSecurityGroup
+            rep_config_req_params['bandwidthThrottling']=int(bandwitdh)
+            rep_config_req_params['createPublicIP']=publicIp
+            rep_config_req_params['dataPlaneRouting']=dataRouting
+            rep_config_req_params['defaultLargeStagingDiskType']=diskType
+            if kmsKeyArn is not None:
+              rep_config_req_params['ebsEncryption']='CUSTOM'
+              rep_config_req_params['ebsEncryptionKeyArn']=kmsKeyArn
+            else:
+              rep_config_req_params['ebsEncryption']='DEFAULT'
+            rep_config_req_params['replicationServerInstanceType']=instanceType
+            rep_config_req_params['replicationServersSecurityGroupsIDs']=securityGroupIds
+            rep_config_req_params['stagingAreaSubnetId']=subnet
+            rep_config_req_params['stagingAreaTags']=stagingTags
+            rep_config_req_params['useDedicatedReplicationServer']=dedicatedReplicationServer
+
+            rId = None
+            response = None
+            aws_account_id = context.invoked_function_arn.split(":")[4]
+            mgn_service_role_arn = "arn:aws:iam::{}:role/aws-service-role/mgn.amazonaws.com/AWSServiceRoleForApplicationMigrationService".format(aws_account_id)
+            if request_type == "Create" or request_type == "Update":
+              try:
+                if request_type == "Create":
+                  print("Initializing MGN")
+                  mgn.initialize_service()
+                  print("Setting up replication config")
+                  response = mgn.create_replication_configuration_template(**rep_config_req_params)
+                  if kmsKeyArn is not None:
+                    print('Creating KMS Grant')
+                    create_kms_grant(kmsKeyArn, mgn_service_role_arn)
+                    print('KMS Grant Created')
+                  rId = response['replicationConfigurationTemplateID']
+                  print("Completed init of MGN")
+                else:
+                  print("Updating replication config")
+                  rId = event['PhysicalResourceId']
+                  rep_config_req_params['replicationConfigurationTemplateID']=rId
+                  response = mgn.update_replication_configuration_template(**rep_config_req_params)
+                  rId = response['replicationConfigurationTemplateID']
+                  oldKmsKeyArn = event['OldResourceProperties']['KMSKeyArn']
+                  if kmsKeyArn is not None and oldKmsKeyArn != kmsKeyArn:
+                    create_kms_grant(kmsKeyArn, mgn_service_role_arn)
+              except Exception as e:
+                print("Error initializing MGN")
+                print("Exception: " + (str(e)))
+                responseData = {}
+                cfnresponse.send(event, context, cfnresponse.FAILED, responseData, rId)
+                raise e
+            else:
+              print("Removing MGN replication config")
+              rId = event['PhysicalResourceId']
+              if "rct-" in rId:
+                response = mgn.delete_replication_configuration_template(replicationConfigurationTemplateID=rId)
+
+            responseData = {}
+            responseData['Data'] = response
+            cfnresponse.send(event, context, cfnresponse.SUCCESS, responseData, rId)
+
+  rMgnInitializer:
+    Type: Custom::MGNInitializer
+    Properties:
+      ServiceToken: !GetAtt rMGNInitializerLambdaFunction.Arn
+      CreateReplicationSecurityGroup: !Ref pCreateReplicationSecurityGroup
+      CreatePublicIp: !Ref pReplicationServerPublicIp
+      KMSKeyArn: !Ref pKMSKeyArn
+      ReplicationInstanceType: !Ref pReplicationInstanceType
+      ReplicationSecurityGroupIds: !Ref pReplicationSecurityGroupIds
+      ReplicationDataRouting: !Ref pReplicationServerDataRouting
+      StagingSubnetId: !Ref pReplicationSubnetId
+      ReplicationBandwidthInMB: !Ref pReplicationDataThrottling
+      StagingDiskType: !Ref pReplicationStagingDiskType
+      Tags: !Ref pReplicationServerTags
+      UseDedicatedReplicationServer: !Ref pUseDedicatedReplicationServer
+
+Outputs:
+  oReplicationConfigurationTemplateId:
+    Description: Replication Configuration template ID
+    Value: !Ref rMgnInitializer

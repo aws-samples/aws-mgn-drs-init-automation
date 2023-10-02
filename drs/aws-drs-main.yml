@@ -1,0 +1,207 @@
+#########################################################################################
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.                    #
+# SPDX-License-Identifier: MIT-0                                                        #
+#                                                                                       #
+# Permission is hereby granted, free of charge, to any person obtaining a copy of this  #
+# software and associated documentation files (the "Software"), to deal in the Software #
+# without restriction, including without limitation the rights to use, copy, modify,    #
+# merge, publish, distribute, sublicense, and/or sell copies of the Software, and to    #
+# permit persons to whom the Software is furnished to do so.                            #
+#                                                                                       #
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,   #
+# INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A         #
+# PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT    #
+# HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION     #
+# OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE        #
+# SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                                #
+#########################################################################################
+
+AWSTemplateFormatVersion: 2010-09-09
+Description: This template defines nested stacks which create IAM roles required for DRS initialization and configures the service
+
+Parameters:
+  pReplicationSubnetId:
+    Description: Subnet Id for Replication Server
+    Type: AWS::EC2::Subnet::Id
+  pReplicationInstanceType:
+    Description: Replication Server Instance Type
+    Default: "t3.small"
+    Type: String
+  pReplicationSecurityGroupIds:
+    Description: Security Group Ids for Replication Servers
+    Type: List<AWS::EC2::SecurityGroup::Id>
+  pKMSKeyArn:
+    Description: ARN of KMS Key for ebs encryption
+    Type: String
+    Default: ""
+  pReplicationServerTags:
+    Description: Tags for replication servers (Please specify in KEY:VALUE format. Multiple entries can be comma separated)
+    Type: CommaDelimitedList
+    Default: "Division:TEST,Environment:Dev,Application:testapp,DataClassification:Proprietary,CostCenter:999999999,Consumer:tcconlin@amazon.com"
+  pCreateReplicationSecurityGroup:
+    Description: Create default replication security group
+    Type: String
+    Default: 'No'
+    AllowedValues:
+      - 'Yes'
+      - 'No'
+  pReplicationServerPublicIp:
+    Description: Use Public IP for Replication server control plane traffic
+    Type: String
+    Default: 'No'
+    AllowedValues:
+      - 'Yes'
+      - 'No'
+  pReplicationServerDataRouting:
+    Description: Replication Server data plane traffic connectivity
+    Type: String
+    Default: PRIVATE_IP
+    AllowedValues:
+      - PUBLIC_IP
+      - PRIVATE_IP
+  pReplicationDataThrottling:
+    Description: Throttle Replication traffic. (Set to 0 to use all available bandwidth on source server or else specify a value to limit bandwidth usage)
+    Type: Number
+    Default: 0
+  pReplicationStagingDiskType:
+    Description: Replication Server staging disk type
+    Type: String
+    Default: 'GP3'
+    AllowedValues:
+      - 'GP3'
+      - 'GP2'
+      - 'ST1'
+  pUseDedicatedReplicationServer:
+    Description: Use dedicated replication server for each source machine
+    Type: String
+    Default: 'No'
+    AllowedValues:
+      - 'Yes'
+      - 'No'
+  pPitPolicyMinute:
+    Description: The by Minute Point in time (PIT) policy to manage snapshots taken during replication.
+    Type: CommaDelimitedList
+    Default: 'enabled:True,interval:10,retentionDuration:60,ruleID:1,units:MINUTE'
+  pPitPolicyHour:
+    Description: The Hourly Point in time (PIT) policy to manage snapshots taken during replication.
+    Type: CommaDelimitedList
+    Default: 'enabled:True,interval:1,retentionDuration:24,ruleID:2,units:HOUR'
+  pPitPolicyDay:
+    Description: The Daily Point in time (PIT) policy to manage snapshots taken during replication.
+    Type: CommaDelimitedList
+    Default: 'enabled:True,interval:1,retentionDuration:10,ruleID:3,units:DAY'
+  pDRSIamCentralRegion:
+    Description: "The central region used for conditionally deploying IAM roles for DRS"
+    Type: String
+    Default: 'us-east-1'
+
+Metadata: 
+  AWS::CloudFormation::Interface: 
+    ParameterGroups: 
+      - 
+        Label: 
+          default: "Replication Server Settings"
+        Parameters: 
+          - pReplicationInstanceType
+          - pReplicationStagingDiskType
+          - pUseDedicatedReplicationServer
+          - pKMSKeyArn
+          - pReplicationServerTags
+      - 
+        Label: 
+          default: "Replication Network Setting"
+        Parameters: 
+          - pReplicationSubnetId
+          - pReplicationSecurityGroupIds
+          - pReplicationServerPublicIp
+          - pReplicationServerDataRouting
+          - pReplicationDataThrottling
+          - pCreateReplicationSecurityGroup
+      - 
+        Label: 
+          default: "DRS Central Region for IAM roles"
+        Parameters:
+          - pDRSIamCentralRegion
+
+    ParameterLabels: 
+      pReplicationSubnetId: 
+        default: "Replication Server Subnet"
+      pReplicationSecurityGroupIds:
+        default: "Replication Server Security Groups"
+      pReplicationInstanceType:
+        default: "Replication Server Instance Type"
+      pKMSKeyArn:
+        default: "KMS Key ARN for EBS encryption"
+      pReplicationServerTags:
+        default: "Tags to be applied to replication server"
+      pCreateReplicationSecurityGroup:
+        default: "Create new replication security group"
+      pReplicationServerPublicIp:
+        default: "Use Public IP for Replication server control plane traffic"
+      pReplicationServerDataRouting:
+        default: "Replication Server data plane traffic connectivity"
+      pReplicationDataThrottling:
+        default: "Replication Bandwidth limit in MB"
+      pReplicationStagingDiskType:
+        default: "Replication Server staging disk type"
+      pUseDedicatedReplicationServer:
+        default: "Use dedicated replication server for each source machine"
+      pDRSIamCentralRegion:
+        default: "The central region used for conditionally deploying IAM roles for DRS"
+
+Conditions:
+  cIsCentralRegion:
+    !Equals [!Ref AWS::Region, !Ref pDRSIamCentralRegion]
+  cIsNotCentralRegion:
+    !Not [!Equals [!Ref AWS::Region, !Ref pDRSIamCentralRegion]]
+
+Resources:
+
+  rDRSInitIAMRoles:
+    Type: AWS::CloudFormation::Stack
+    Condition: cIsCentralRegion
+    Properties:
+      TemplateURL: ./drs-iam.yml
+  
+  rDRSInitWithIAM:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: rDRSInitIAMRoles
+    Condition: cIsCentralRegion
+    Properties:
+      TemplateURL: ./aws-drs-initializer-cfn.yml
+      Parameters:
+        pReplicationSubnetId: !Ref pReplicationSubnetId
+        pReplicationSecurityGroupIds: !Join [",", !Ref pReplicationSecurityGroupIds] 
+        pReplicationInstanceType: !Ref pReplicationInstanceType
+        pKMSKeyArn: !Ref pKMSKeyArn
+        pReplicationServerTags: !Join [",", !Ref pReplicationServerTags]
+        pCreateReplicationSecurityGroup: !Ref pCreateReplicationSecurityGroup
+        pReplicationServerPublicIp: !Ref pReplicationServerPublicIp
+        pReplicationServerDataRouting: !Ref pReplicationServerDataRouting
+        pReplicationDataThrottling: !Ref pReplicationDataThrottling
+        pReplicationStagingDiskType: !Ref pReplicationStagingDiskType
+        pUseDedicatedReplicationServer: !Ref pUseDedicatedReplicationServer
+        pPitPolicyMinute: !Join [",", !Ref pPitPolicyMinute]
+        pPitPolicyHour: !Join [",", !Ref pPitPolicyHour]
+        pPitPolicyDay: !Join [",", !Ref pPitPolicyDay]
+
+  rDRSInit:
+    Type: AWS::CloudFormation::Stack
+    Condition: cIsNotCentralRegion
+    Properties:
+      TemplateURL: ./aws-drs-initializer-cfn.yml
+      Parameters:
+        pReplicationSubnetId: !Ref pReplicationSubnetId
+        pReplicationSecurityGroupIds: !Join [",", !Ref pReplicationSecurityGroupIds] 
+        pReplicationInstanceType: !Ref pReplicationInstanceType
+        pKMSKeyArn: !Ref pKMSKeyArn
+        pReplicationServerTags: !Join [",", !Ref pReplicationServerTags]
+        pCreateReplicationSecurityGroup: !Ref pCreateReplicationSecurityGroup
+        pReplicationServerPublicIp: !Ref pReplicationServerPublicIp
+        pReplicationServerDataRouting: !Ref pReplicationServerDataRouting
+        pReplicationDataThrottling: !Ref pReplicationDataThrottling
+        pReplicationStagingDiskType: !Ref pReplicationStagingDiskType
+        pUseDedicatedReplicationServer: !Ref pUseDedicatedReplicationServer
+        pPitPolicyMinute: !Join [",", !Ref pPitPolicyMinute]
+        pPitPolicyHour: !Join [",", !Ref pPitPolicyHour]
+        pPitPolicyDay: !Join [",", !Ref pPitPolicyDay]
